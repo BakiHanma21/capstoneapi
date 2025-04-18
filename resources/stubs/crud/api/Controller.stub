@@ -1,0 +1,69 @@
+<?php
+
+namespace {{apiControllerNamespace}};
+
+use {{modelNamespace}}\{{modelName}};
+use Illuminate\Http\Request;
+use {{requestNamespace}}\{{modelName}}Request;
+use Illuminate\Http\Response;
+use {{controllerNamespace}}\Controller;
+use {{resourceNamespace}}\{{modelName}}Resource;
+
+class {{modelName}}Controller extends Controller
+{
+    /**
+     * @group {{modelName}} API
+     * 
+     * Get All {{modelName}}
+     */
+    public function index(Request $request)
+    {
+        ${{modelNamePluralLowerCase}} = {{modelName}}::paginate();
+
+        return {{modelName}}Resource::collection(${{modelNamePluralLowerCase}});
+    }
+
+    /**
+     * @group {{modelName}} API
+     * 
+     * Store {{modelName}}
+     */
+    public function store({{modelName}}Request $request): {{modelName}}
+    {
+        return {{modelName}}::create($request->validated());
+    }
+
+    /**
+     * @group {{modelName}} API
+     * 
+     * Show {{modelName}}
+     */
+    public function show({{modelName}} ${{modelNameLowerCase}}): {{modelName}}
+    {
+        return ${{modelNameLowerCase}};
+    }
+
+     /**
+     * @group {{modelName}} API
+     * 
+     * Update {{modelName}}
+     */
+    public function update({{modelName}}Request $request, {{modelName}} ${{modelNameLowerCase}}): {{modelName}}
+    {
+        ${{modelNameLowerCase}}->update($request->validated());
+
+        return ${{modelNameLowerCase}};
+    }
+
+    /**
+     * @group {{modelName}} API
+     * 
+     * Delete {{modelName}}
+     */
+    public function destroy({{modelName}} ${{modelNameLowerCase}}): Response
+    {
+        ${{modelNameLowerCase}}->delete();
+
+        return response()->noContent();
+    }
+}
