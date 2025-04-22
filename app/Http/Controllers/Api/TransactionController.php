@@ -25,23 +25,15 @@ class TransactionController extends Controller
             $transactions = Transaction::where('customer_id', $user->id)->get();
         }
 
-        // Transform the transactions to ensure full URLs
+        // Transform the transactions to return relative paths
         $transactions = $transactions->map(function ($transaction) {
-            // If the URL is already a full URL (starts with http), leave it as is
             if ($transaction->qr_code_url && !str_starts_with($transaction->qr_code_url, 'http')) {
-                // Check if the path looks like a storage path (e.g., starts with "qr_codes/")
-                if (str_starts_with($transaction->qr_code_url, 'qr_codes/')) {
-                    $transaction->qr_code_url = url('qr_codes/' . basename($transaction->qr_code_url));
-                } else {
-                    $transaction->qr_code_url = url(Storage::url($transaction->qr_code_url));
-                }
+                // Just return the relative path
+                $transaction->qr_code_url = $transaction->qr_code_url;
             }
             if ($transaction->receipt_url && !str_starts_with($transaction->receipt_url, 'http')) {
-                if (str_starts_with($transaction->receipt_url, 'receipts/')) {
-                    $transaction->receipt_url = url('receipts/' . basename($transaction->receipt_url));
-                } else {
-                    $transaction->receipt_url = url(Storage::url($transaction->receipt_url));
-                }
+                // Just return the relative path
+                $transaction->receipt_url = $transaction->receipt_url;
             }
             return $transaction;
         });
@@ -62,25 +54,21 @@ class TransactionController extends Controller
 
         if ($request->hasFile('qr_code')) {
             $file = $request->file('qr_code');
-            // Define the destination path in the top-level public folder
             $destinationPath = public_path('qr_codes');
-            // Ensure the directory exists
             if (!file_exists($destinationPath)) {
                 mkdir($destinationPath, 0755, true);
             }
-            // Generate a unique filename
             $filename = uniqid() . '.' . $file->getClientOriginalExtension();
-            // Move the file to the public/qr_codes directory
             $file->move($destinationPath, $filename);
-            // Generate the full URL
-            $fullUrl = url('qr_codes/' . $filename);
-            // Store the relative path in the database
-            $transaction->qr_code_url = 'qr_codes/' . $filename;
+            
+            // Store the relative path only
+            $relativePath = 'qr_codes/' . $filename;
+            $transaction->qr_code_url = $relativePath;
             $transaction->save();
 
             return response()->json([
                 'message' => 'QR Code uploaded successfully',
-                'qr_code_url' => $fullUrl
+                'qr_code_url' => $relativePath
             ], 200);
         }
 
@@ -96,25 +84,21 @@ class TransactionController extends Controller
 
         if ($request->hasFile('receipt')) {
             $file = $request->file('receipt');
-            // Define the destination path in the top-level public folder
             $destinationPath = public_path('receipts');
-            // Ensure the directory exists
             if (!file_exists($destinationPath)) {
                 mkdir($destinationPath, 0755, true);
             }
-            // Generate a unique filename
             $filename = uniqid() . '.' . $file->getClientOriginalExtension();
-            // Move the file to the public/receipts directory
             $file->move($destinationPath, $filename);
-            // Generate the full URL
-            $fullUrl = url('receipts/' . $filename);
-            // Store the relative path in the database
-            $transaction->receipt_url = 'receipts/' . $filename;
+            
+            // Store the relative path only
+            $relativePath = 'receipts/' . $filename;
+            $transaction->receipt_url = $relativePath;
             $transaction->save();
 
             return response()->json([
                 'message' => 'Receipt uploaded successfully',
-                'receipt_url' => $fullUrl
+                'receipt_url' => $relativePath
             ], 200);
         }
 
@@ -139,20 +123,12 @@ class TransactionController extends Controller
         $transaction->payment_date = now();
         $transaction->save();
 
-        // Ensure full URLs in the response
+        // Return relative paths in the response
         if ($transaction->qr_code_url && !str_starts_with($transaction->qr_code_url, 'http')) {
-            if (str_starts_with($transaction->qr_code_url, 'qr_codes/')) {
-                $transaction->qr_code_url = url('qr_codes/' . basename($transaction->qr_code_url));
-            } else {
-                $transaction->qr_code_url = url(Storage::url($transaction->qr_code_url));
-            }
+            $transaction->qr_code_url = $transaction->qr_code_url;
         }
         if ($transaction->receipt_url && !str_starts_with($transaction->receipt_url, 'http')) {
-            if (str_starts_with($transaction->receipt_url, 'receipts/')) {
-                $transaction->receipt_url = url('receipts/' . basename($transaction->receipt_url));
-            } else {
-                $transaction->receipt_url = url(Storage::url($transaction->receipt_url));
-            }
+            $transaction->receipt_url = $transaction->receipt_url;
         }
 
         return response()->json([
@@ -169,19 +145,12 @@ class TransactionController extends Controller
 
     public function show(Transaction $transaction): Transaction
     {
+        // Return relative paths
         if ($transaction->qr_code_url && !str_starts_with($transaction->qr_code_url, 'http')) {
-            if (str_starts_with($transaction->qr_code_url, 'qr_codes/')) {
-                $transaction->qr_code_url = url('qr_codes/' . basename($transaction->qr_code_url));
-            } else {
-                $transaction->qr_code_url = url(Storage::url($transaction->qr_code_url));
-            }
+            $transaction->qr_code_url = $transaction->qr_code_url;
         }
         if ($transaction->receipt_url && !str_starts_with($transaction->receipt_url, 'http')) {
-            if (str_starts_with($transaction->receipt_url, 'receipts/')) {
-                $transaction->receipt_url = url('receipts/' . basename($transaction->receipt_url));
-            } else {
-                $transaction->receipt_url = url(Storage::url($transaction->receipt_url));
-            }
+            $transaction->receipt_url = $transaction->receipt_url;
         }
         return $transaction;
     }

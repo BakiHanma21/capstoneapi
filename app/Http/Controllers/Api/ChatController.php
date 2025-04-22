@@ -67,16 +67,17 @@ class ChatController extends Controller
             $extension = $file->getClientOriginalExtension();
             $fileName = time() . '_' . Str::random(10) . '.' . $extension;
             
-            // Move file to public/uploads/chat directory
-            $destinationPath = public_path('uploads/chat');
-            if (!file_exists($destinationPath)) {
-                mkdir($destinationPath, 0777, true);
+            // Create upload directory if it doesn't exist
+            $uploadPath = public_path('uploads/chat');
+            if (!file_exists($uploadPath)) {
+                mkdir($uploadPath, 0777, true);
             }
             
-            $file->move($destinationPath, $fileName);
+            // Move the uploaded file
+            $file->move($uploadPath, $fileName);
             
-            // Store relative path in database
-            $chat->file_path = '/uploads/chat/' . $fileName;
+            // Store just the relative path
+            $chat->file_path = 'uploads/chat/' . $fileName;
             $chat->file_name = $originalName;
             $chat->file_type = $extension;
         }
@@ -86,7 +87,8 @@ class ChatController extends Controller
         // Add file URL to the response
         $chatResponse = $chat->toArray();
         if ($chat->file_path) {
-            $chatResponse['file_url'] = asset($chat->file_path);
+            // Don't use url() helper, just append the path to the domain
+            $chatResponse['file_url'] = $chat->file_path;
             $chatResponse['file_name'] = $chat->file_name;
             $chatResponse['file_type'] = $chat->file_type;
         }
@@ -148,7 +150,8 @@ class ChatController extends Controller
         $messagesResponse = $messages->map(function ($message) {
             $messageArray = $message->toArray();
             if ($message->file_path) {
-                $messageArray['file_url'] = asset($message->file_path);
+                // Just use the relative path
+                $messageArray['file_url'] = $message->file_path;
                 $messageArray['file_name'] = $message->file_name;
                 $messageArray['file_type'] = $message->file_type;
             }
