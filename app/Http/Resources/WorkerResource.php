@@ -34,6 +34,7 @@ class WorkerResource extends JsonResource
             }),
             'works' => $this->works->map(function ($work) {
                 return [
+                    'work_id' => $work->work_id,
                     'title' => $work->title,
                     'description' => $work->description,
                     'image' => url(Storage::url($work->image)),

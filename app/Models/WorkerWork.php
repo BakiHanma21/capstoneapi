@@ -24,6 +24,13 @@ class WorkerWork extends Model
     protected $perPage = 20;
 
     /**
+     * The primary key for the model.
+     *
+     * @var string
+     */
+    protected $primaryKey = 'work_id';
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>

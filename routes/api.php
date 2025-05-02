@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Http\Request;
+
 use App\Http\Controllers\Api\{
     UserController,
     ReportController,
@@ -16,7 +17,10 @@ use App\Http\Controllers\Api\{
     Auth\AuthController,
     ProfileController,
     ChatController
+
 };
+
+
 
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/register', [AuthController::class, 'register']);
@@ -85,4 +89,19 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/transactions/{transactionId}/submit-review', [TransactionController::class, 'submitReview']);
     Route::post('/transactions/{transactionId}/submit-review2', [TransactionController::class, 'submitReview2']);
     Route::put('/transactions/{transactionId}/success', [TransactionController::class, 'paySuccess']);
+
+    // Worker works route
+    Route::post('/worker-works/{id}/update-with-image', [WorkerWorkController::class, 'updateWithImage']);
+
+    // Worker schedule route
+    Route::get('/workers/{workerId}/schedule', [BookingController::class, 'getWorkerSchedule']);
+
+    // Worker availability check route
+    Route::get('/workers/{workerId}/check-availability', [BookingController::class, 'checkAvailability']);
+
+    // New profile routes
+    Route::get('/view-user-profile', [ProfileController::class, 'getUserProfile']);
+    Route::put('/update-user-profile', [ProfileController::class, 'updateUserProfile']);
+    Route::post('/update-profile-image', [ProfileController::class, 'updateProfileImage']);
 });
+

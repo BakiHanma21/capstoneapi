@@ -1,7 +1,8 @@
 <?php
 
-namespace App\Http\Controllers;
+namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
@@ -114,5 +115,105 @@ class ProfileController extends Controller
 
         return response()->json(['message' => 'Profile updated successfully!', 'worker' => $worker]);
     }
-    
+
+    public function getUserProfile()
+    {
+        try {
+            $user = Auth::user();
+            $userData = [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'location' => $user->location,
+                'profile_image' => $user->profile_image,
+                'purok' => $user->purok,
+                'street' => $user->street,
+                'rating' => $user->rating,
+                'created_at' => $user->created_at
+            ];
+
+            return response()->json([
+                'status' => 'success',
+                'data' => $userData
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to fetch user profile'
+            ], 500);
+        }
+    }
+
+    public function updateUserProfile(Request $request)
+    {
+        try {
+            $user = Auth::user();
+
+            $validated = $request->validate([
+                'name' => 'required|string|max:255',
+                'email' => 'required|email|unique:users,email,' . $user->id,
+                'phone' => 'nullable|string|max:255',
+                'location' => 'nullable|string|max:255',
+                'purok' => 'nullable|string',
+                'street' => 'nullable|string',
+                
+            ]);
+
+            $user->update($validated);
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Profile updated successfully',
+                'data' => $user
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Error updating user profile: ' . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to update profile'
+            ], 500);
+        }
+    }
+
+    public function updateProfileImage(Request $request)
+    {
+        try {
+            $request->validate([
+                'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048'
+            ]);
+
+            $user = Auth::user();
+
+            if ($request->hasFile('profile_image')) {
+                // Delete old image if exists
+                if ($user->profile_image && file_exists(public_path($user->profile_image))) {
+                    unlink(public_path($user->profile_image));
+                }
+                
+                // Store in storage/images directory
+                $imageName = time() . '.' . $request->profile_image->extension();
+                $request->profile_image->move(public_path('storage/images'), $imageName);
+                
+                // Save path relative to public directory
+                $user->profile_image = 'storage/images/' . $imageName;
+                $user->save();
+            }
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Profile image updated successfully',
+                'profile_image' => $user->profile_image,
+                'profile_image_url' => asset($user->profile_image)
+            ]);
+
+        } catch (\Exception $e) {
+            \Log::error('Error updating profile image: ' . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to update profile image'
+            ], 500);
+        }
+    }
 }
