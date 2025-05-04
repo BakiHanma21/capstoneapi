@@ -12,8 +12,11 @@ class EventResource extends JsonResource
      *
      * @return array<string, mixed>
      */
-        public function toArray($request)
+    public function toArray($request)
     {
+        // Get client name from the customer relationship
+        $clientName = $this->customer ? $this->customer->name : 'Unknown Client';
+        
         return [
             'title' => $this->title,
             'start' => $this->start,
@@ -23,7 +26,9 @@ class EventResource extends JsonResource
             'status' => 'Booked',
             'extendedProps' => [
                 'status' => 'Booked',
-                'requestId' => $this->customer_id,
+                'requestId' => $this->booking_id, 
+                'customer_id' => $this->customer_id,
+                'client_name' => $clientName,
             ],
         ];
     }

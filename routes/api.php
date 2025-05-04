@@ -79,6 +79,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('show-reports', [UserController::class, 'showreports']);
     Route::put('/update-admin-profile', [UserController::class, 'updateadmin'])->name('profile.adminupdate');
     Route::post('/update-worker-picture', [SkilledWorkerController::class, 'updateworkerprofile'])->name('profile.workerupdate');
+    Route::post('/change-password', [SkilledWorkerController::class, 'changePassword'])->name('password.change');
     Route::delete('/delete-user/{id}', [UserController::class, 'deleteuser']);
     Route::post('/update-admin-picture', [UserController::class, 'updateProfilePicture'])->name('profile.adminpicture');
     Route::get('show-verification', [UserController::class, 'showverifications']);
@@ -103,5 +104,6 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/view-user-profile', [ProfileController::class, 'getUserProfile']);
     Route::put('/update-user-profile', [ProfileController::class, 'updateUserProfile']);
     Route::post('/update-profile-image', [ProfileController::class, 'updateProfileImage']);
+    Route::post('/change-user-password', [ProfileController::class, 'changeUserPassword']);
 });
 

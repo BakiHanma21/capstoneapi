@@ -200,9 +200,10 @@ class BookingController extends Controller
                 return response()->json(['error' => 'Unauthorized!'], 401);
             }
 
-            // Get all confirmed bookings for the worker
+            // Get all confirmed bookings for the worker with customer relationship
             $events = Booking::where('status', 'CONFIRMED')
                            ->where('worker_id', $user->id)
+                           ->with('customer') // Include the customer relationship
                            ->get();
 
             return EventResource::collection($events);

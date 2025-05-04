@@ -131,6 +131,7 @@ class ProfileController extends Controller
                 'street' => $user->street,
                 'rating' => $user->rating,
                 'created_at' => $user->created_at
+                
             ];
 
             return response()->json([
@@ -213,6 +214,50 @@ class ProfileController extends Controller
             return response()->json([
                 'status' => 'error',
                 'message' => 'Failed to update profile image'
+            ], 500);
+        }
+    }
+
+    /**
+     * Change user password
+     * 
+     * @param Request $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function changeUserPassword(Request $request)
+    {
+        try {
+            $validated = $request->validate([
+                'current_password' => 'required',
+                'new_password' => 'required|min:8|confirmed',
+                'new_password_confirmation' => 'required'
+            ]);
+
+            $user = Auth::user();
+
+            // Check if current password matches
+            if (!Hash::check($validated['current_password'], $user->password)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => 'Current password is incorrect'
+                ], 422);
+            }
+
+            // Update the password
+            $user->password = Hash::make($validated['new_password']);
+            $user->save();
+
+            return response()->json([
+                'status' => 'success',
+                'message' => 'Password changed successfully'
+            ]);
+            
+        } catch (\Exception $e) {
+            \Log::error('Error changing user password: ' . $e->getMessage());
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Failed to change password',
+                'errors' => $e->getMessage()
             ], 500);
         }
     }
