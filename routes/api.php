@@ -56,6 +56,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::post('/transactions/{transactionId}/upload-qr-code', [TransactionController::class, 'uploadQrCode']);
     Route::post('/transactions/{transactionId}/upload-receipt', [TransactionController::class, 'uploadReceipt']);
+    Route::post('/transactions/{transactionId}/remove-qr-code', [SkilledWorkerController::class, 'removeQrCode']);
     Route::get('/workers/{userId}/requests', [WorkRequestController::class, 'getWorkerRequests']);
     Route::get('/workers', [WorkRequestController::class, 'index']);
     Route::delete('/workers/{id}', [WorkRequestController::class, 'destroy']);
