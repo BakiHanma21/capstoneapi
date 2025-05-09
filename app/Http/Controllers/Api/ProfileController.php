@@ -120,18 +120,27 @@ class ProfileController extends Controller
     {
         try {
             $user = Auth::user();
+            
+            // Format the image path properly
+            $imagePath = $user->image;
+            if ($imagePath && !str_starts_with($imagePath, 'storage/')) {
+                // If path exists but doesn't start with 'storage/', add it
+                if (str_starts_with($imagePath, '/images/') || str_starts_with($imagePath, 'images/')) {
+                    $imagePath = 'storage' . (str_starts_with($imagePath, '/') ? $imagePath : '/' . $imagePath);
+                }
+            }
+            
             $userData = [
                 'id' => $user->id,
                 'name' => $user->name,
                 'email' => $user->email,
                 'phone' => $user->phone,
                 'location' => $user->location,
-                'profile_image' => $user->profile_image,
+                'image' => $imagePath,
                 'purok' => $user->purok,
                 'street' => $user->street,
                 'rating' => $user->rating,
                 'created_at' => $user->created_at
-                
             ];
 
             return response()->json([
@@ -182,31 +191,31 @@ class ProfileController extends Controller
     {
         try {
             $request->validate([
-                'profile_image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048'
+                'image' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048'
             ]);
 
             $user = Auth::user();
 
-            if ($request->hasFile('profile_image')) {
+            if ($request->hasFile('image')) {
                 // Delete old image if exists
-                if ($user->profile_image && file_exists(public_path($user->profile_image))) {
-                    unlink(public_path($user->profile_image));
+                if ($user->image && file_exists(public_path($user->image))) {
+                    unlink(public_path($user->image));
                 }
                 
                 // Store in storage/images directory
-                $imageName = time() . '.' . $request->profile_image->extension();
-                $request->profile_image->move(public_path('storage/images'), $imageName);
+                $imageName = time() . '.' . $request->image->extension();
+                $request->image->move(public_path('storage/images'), $imageName);
                 
                 // Save path relative to public directory
-                $user->profile_image = 'storage/images/' . $imageName;
+                $user->image = 'storage/images/' . $imageName;
                 $user->save();
             }
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Profile image updated successfully',
-                'profile_image' => $user->profile_image,
-                'profile_image_url' => asset($user->profile_image)
+                'image' => $user->image,
+                'image_url' => asset($user->image)
             ]);
 
         } catch (\Exception $e) {
