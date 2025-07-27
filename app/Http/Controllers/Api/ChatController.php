@@ -426,8 +426,44 @@ class ChatController extends Controller
     public function markNotificationAsRead($notificationId)
     {
         $user = Auth::user();
-        $notification = $user->notifications()->findOrFail($notificationId);
+        $notification = $user->notifications()->where('id', $notificationId)->first();
+        
+        if ($notification) {
         $notification->markAsRead();
         return response()->json(['message' => 'Notification marked as read']);
+        }
+        
+        return response()->json(['error' => 'Notification not found'], 404);
+    }
+
+    /**
+     * Get online users
+     * 
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function getOnlineUsers()
+    {
+        // In a real application, this would be implemented with Redis or a similar solution
+        // For this implementation, we'll use a simple approach with session activity
+        
+        // Get users who have been active in the last 5 minutes
+        $activeUsers = User::where('last_activity_at', '>=', now()->subMinutes(5))
+            ->pluck('id')
+            ->toArray();
+            
+        // Add the current user to the list of online users
+        $currentUser = Auth::user();
+        if (!in_array($currentUser->id, $activeUsers)) {
+            $activeUsers[] = $currentUser->id;
+        }
+        
+        // Update the current user's last activity timestamp
+        $currentUser->last_activity_at = now();
+        $currentUser->save();
+        
+        // Broadcast the online users
+        broadcast(new \App\Events\UserOnlineStatus($activeUsers))->toOthers();
+        
+        return response()->json($activeUsers);
     }
 }

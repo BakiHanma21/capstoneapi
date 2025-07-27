@@ -19,6 +19,7 @@ return new class extends Migration
             $table->enum('status', ['PENDING', 'APPROVED', 'REJECTED'])->default('PENDING'); // Status column
             $table->decimal('proposed_cost', 10, 2); // Proposed cost with precision
             $table->text('description')->nullable(); // Optional description
+            $table->string('user_profile_image')->nullable(); // Add this line
             $table->timestamps();             // created_at and updated_at
         });
     }

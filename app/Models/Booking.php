@@ -24,6 +24,7 @@ class Booking extends Model
         'end',
         'status',
         'image',
+        'removed_at' // Add new field
     ];
 
     public function worker()

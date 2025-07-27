@@ -15,15 +15,17 @@ class AccountDenied extends Mailable
     use Queueable, SerializesModels;
 
     protected $user;
+    protected $denialReason;
 
     /**
      * Create a new message instance.
      *
      * @return void
      */
-    public function __construct(User $user)
+    public function __construct(User $user, $denialReason = null)
     {
         $this->user = $user;
+        $this->denialReason = $denialReason;
     }
 
     /**
@@ -36,7 +38,8 @@ class AccountDenied extends Mailable
         return $this->subject('Your Account Registration Has Been Denied')
             ->view('emails.account-denied')
             ->with([
-                'userName' => $this->user->name
+                'userName' => $this->user->name,
+                'denialReason' => $this->denialReason
             ]);
     }
 }

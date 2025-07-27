@@ -14,9 +14,21 @@ use App\Http\Resources\EventResource;
 use Illuminate\Support\Facades\Auth;
 use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
+use App\Services\FirebaseService;
+use App\Notifications\BookingRequestNotification;
+use App\Notifications\BookingApprovedNotification;
+use App\Notifications\BookingDeclinedNotification;
 
 class BookingController extends Controller
 {
+    protected $firebaseService;
+
+    public function __construct(FirebaseService $firebaseService)
+    {
+        $this->firebaseService = $firebaseService;
+    }
+
     /**
      * @group Booking API
      * 
@@ -97,12 +109,13 @@ class BookingController extends Controller
         $request->validate([
             'worker_id' => 'required|exists:users,id',
             'title' => 'required|string|max:255',
-            'description' => 'required|string',
+            'description' => 'required|string|max:1000', // Updated to max:1000
             'start_date' => 'required|date',
             'end_date' => 'required|date|after_or_equal:start_date',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif,svg|max:2048',
             'cost' => 'required|numeric',
             'time' => 'required|date_format:H:i',
+            'force_booking' => 'nullable|string',
         ]);
 
         // Verify that the worker exists and is actually a worker
@@ -118,13 +131,17 @@ class BookingController extends Controller
             $request->time
         );
 
-        if (!empty($conflicts['conflicts'])) {
+        // Only block booking if there are conflicts AND force_booking is not set
+        if (!empty($conflicts['conflicts']) && $request->force_booking !== 'true') {
             return response()->json([
                 'error' => 'Scheduling Conflict',
                 'message' => 'The worker is not available for the selected date and time',
                 'conflicts' => $conflicts['conflicts']
             ], 409);
         }
+        
+        // If force_booking is true, we'll allow the booking to proceed even with conflicts
+        // The worker can still approve or decline the request
 
         if ($request->hasFile('image')) {
             $file = $request->file('image');
@@ -151,10 +168,136 @@ class BookingController extends Controller
             'image' => $imagePath,
         ]);
 
+        // Send push notification to worker about the new booking request
+        $this->sendPushNotificationToWorker($booking, $worker);
+
         return response()->json([
             'message' => 'Booking created successfully',
             'booking' => $booking
         ], 201);
+    }
+
+    /**
+     * Send push notification to worker about new booking request
+     */
+    private function sendPushNotificationToWorker($booking, $worker)
+    {
+        $customer = User::find($booking->customer_id);
+        
+        // Create database notification for worker
+        $workerUser = User::find($worker->id);
+        if ($workerUser) {
+            // Use the exact booking creation time for accurate timestamps
+            $exactRequestTime = $booking->created_at;
+            
+            $workerUser->notify(new BookingRequestNotification(
+                $booking,
+                $worker,
+                $customer
+            ));
+            
+            Log::info('Database notification created for worker with timestamp', [
+                'worker_id' => $worker->id,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $exactRequestTime->toIso8601String()
+            ]);
+        }
+        
+        // Also create a notification for the customer about their booking request
+        if ($customer) {
+            // Create a notification object for the customer
+            $customerNotification = new \stdClass();
+            $customerNotification->title = "🛠 New Booking Request Sent";
+            $customerNotification->body = "You have sent a booking request for {$booking->title} to {$worker->name}.";
+            $customerNotification->notification_type = 'new_booking_request';
+            $customerNotification->data = [
+                'booking_id' => $booking->booking_id,
+                'worker_id' => $worker->id,
+                'worker_name' => $worker->name,
+                'timestamp' => $booking->created_at->toIso8601String()
+            ];
+            
+            // Store notification in database for customer
+            $customer->notify(new \App\Notifications\GenericNotification($customerNotification));
+            
+            Log::info('Database notification created for customer about their booking request', [
+                'customer_id' => $customer->id,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $booking->created_at->toIso8601String()
+            ]);
+            
+            // Send push notification to customer if they have a device token
+            if ($customer->device_token) {
+                $this->firebaseService->sendNotification(
+                    $customer->device_token,
+                    [
+                        'title' => $customerNotification->title,
+                        'body' => $customerNotification->body
+                    ],
+                    [
+                        'booking_id' => $booking->booking_id,
+                        'worker_id' => $worker->id,
+                        'worker_name' => $worker->name,
+                        'notification_type' => 'new_booking_request',
+                        'timestamp' => $booking->created_at->toIso8601String()
+                    ],
+                    $customer->device_type
+                );
+            }
+        }
+        
+        // Skip push notification if no device token
+        if (!$worker->device_token) {
+            Log::info('Worker has no device token, skipping push notification', [
+                'worker_id' => $worker->id,
+                'worker_name' => $worker->name
+            ]);
+            return false;
+        }
+        
+        // Create notification payload with accurate timestamp
+        $notification = [
+            'title' => '🛠 New Booking Request',
+            'body' => 'You have a new booking request from ' . $customer->name . ' for ' . $booking->title . ' job.'
+        ];
+        
+        // Use the exact booking creation time for accurate timestamps
+        $exactRequestTime = $booking->created_at;
+        
+        $data = [
+            'booking_id' => $booking->booking_id,
+            'customer_id' => $customer->id,
+            'customer_name' => $customer->name,
+            'notification_type' => 'new_booking_request',
+            'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+            'timestamp' => $exactRequestTime->toIso8601String() // Exact booking request time
+        ];
+        
+        try {
+            $this->firebaseService->sendNotification(
+                $worker->device_token, 
+                $notification, 
+                $data, 
+                $worker->device_type
+            );
+            
+            Log::info('Push notification sent to worker with timestamp', [
+                'worker_id' => $worker->id,
+                'worker_name' => $worker->name,
+                'booking_id' => $booking->booking_id,
+                'device_type' => $worker->device_type,
+                'timestamp' => $exactRequestTime->toIso8601String()
+            ]);
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to send push notification to worker', [
+                'error' => $e->getMessage(),
+                'worker_id' => $worker->id
+            ]);
+            
+            return false;
+        }
     }
 
     /**
@@ -167,16 +310,303 @@ class BookingController extends Controller
         return $booking;
     }
 
-     /**
+    /**
      * @group Booking API
      * 
      * Update Booking
      */
     public function update(BookingRequest $request, Booking $booking): Booking
     {
+        $oldStatus = $booking->status;
         $booking->update($request->validated());
+        
+        // Check if status has changed to CONFIRMED or CANCELLED
+        if ($oldStatus !== $booking->status) {
+            if ($booking->status === 'CONFIRMED') {
+                // Send notification to customer about booking approval
+                $this->sendBookingApprovalNotification($booking);
+            } elseif ($booking->status === 'CANCELLED') {
+                // Send notification to customer about booking decline
+                $this->sendBookingDeclinedNotification($booking);
+            }
+        }
 
         return $booking;
+    }
+
+    /**
+     * Send notification to customer when booking is approved
+     */
+    private function sendBookingApprovalNotification(Booking $booking)
+    {
+        $customer = User::find($booking->customer_id);
+        $worker = User::find($booking->worker_id);
+        
+        // Use current time as the exact approval timestamp
+        $approvalTimestamp = now();
+        
+        // Create database notification for customer
+        if ($customer) {
+            $customer->notify(new BookingApprovedNotification(
+                $booking,
+                $worker,
+                $customer
+            ));
+            
+            Log::info('Database notification created for booking approval with timestamp', [
+                'customer_id' => $customer->id,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $approvalTimestamp->toIso8601String()
+            ]);
+        }
+        
+        // Also create a notification for the worker about their approval
+        if ($worker) {
+            // Create a notification object for the worker
+            $workerNotification = new \stdClass();
+            $workerNotification->title = "✅ Booking Approved";
+            $workerNotification->body = "You have approved a booking request from {$customer->name} for {$booking->title}.";
+            $workerNotification->notification_type = 'booking_approved';
+            
+            // Add flags to ensure the notification is persistent for workers
+            $workerNotification->persistent = true;
+            $workerNotification->for_worker = true;
+            $workerNotification->persist_for_worker = true;
+            
+            $workerNotification->data = [
+                'booking_id' => $booking->booking_id,
+                'customer_id' => $customer->id,
+                'customer_name' => $customer->name,
+                'timestamp' => $approvalTimestamp->toIso8601String(),
+                'persistent' => true,
+                'for_worker' => true,
+                'persist_for_worker' => true
+            ];
+            
+            // Store notification in database for worker
+            $worker->notify(new \App\Notifications\GenericNotification($workerNotification));
+            
+            Log::info('Persistent notification created for worker about booking approval', [
+                'worker_id' => $worker->id,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $approvalTimestamp->toIso8601String(),
+                'persistent' => true
+            ]);
+            
+            // Send push notification to worker if they have a device token
+            if ($worker->device_token) {
+                $this->firebaseService->sendNotification(
+                    $worker->device_token,
+                    [
+                        'title' => $workerNotification->title,
+                        'body' => $workerNotification->body
+                    ],
+                    [
+                        'booking_id' => $booking->booking_id,
+                        'customer_id' => $customer->id,
+                        'customer_name' => $customer->name,
+                        'notification_type' => 'booking_approved',
+                        'timestamp' => $approvalTimestamp->toIso8601String(),
+                        'persistent' => true,
+                        'for_worker' => true,
+                        'persist_for_worker' => true
+                    ],
+                    $worker->device_type
+                );
+            }
+        }
+        
+        // Skip push notification if no device token
+        if (!$customer || !$customer->device_token) {
+            Log::info('Customer has no device token, skipping approval notification', [
+                'customer_id' => $booking->customer_id,
+                'booking_id' => $booking->booking_id
+            ]);
+            return false;
+        }
+        
+        $notification = [
+            'title' => '✅ Booking Approved',
+            'body' => "Your booking request for {$booking->title} has been approved by {$worker->name}."
+        ];
+        
+        $data = [
+            'booking_id' => $booking->booking_id,
+            'worker_id' => $worker->id,
+            'worker_name' => $worker->name,
+            'notification_type' => 'booking_approved',
+            'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+            'timestamp' => $approvalTimestamp->toIso8601String() // Exact approval timestamp
+        ];
+        
+        try {
+            $this->firebaseService->sendNotification(
+                $customer->device_token, 
+                $notification, 
+                $data, 
+                $customer->device_type
+            );
+            
+            Log::info('Booking approval notification sent to customer with timestamp', [
+                'customer_id' => $customer->id,
+                'customer_name' => $customer->name,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $approvalTimestamp->toIso8601String()
+            ]);
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to send booking approval notification', [
+                'error' => $e->getMessage(),
+                'customer_id' => $customer->id
+            ]);
+            
+            return false;
+        }
+    }
+
+    /**
+     * Send notification to customer when booking is declined
+     */
+    private function sendBookingDeclinedNotification(Booking $booking)
+    {
+        $customer = User::find($booking->customer_id);
+        $worker = User::find($booking->worker_id);
+        
+        // Use current time as the exact decline timestamp
+        $declineTimestamp = now();
+        
+        // Create database notification for customer
+        if ($customer) {
+            $customer->notify(new BookingDeclinedNotification(
+                $booking,
+                $worker,
+                $customer
+            ));
+            
+            Log::info('Database notification created for booking decline with timestamp', [
+                'customer_id' => $customer->id,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $declineTimestamp->toIso8601String()
+            ]);
+        }
+        
+        // Also create a notification for the worker about their decline
+        if ($worker) {
+            // Create a notification object for the worker
+            $workerNotification = new \stdClass();
+            $workerNotification->title = "❌ Booking Declined";
+            $workerNotification->body = "You have declined a booking request from {$customer->name} for {$booking->title}.";
+            $workerNotification->notification_type = 'booking_declined';
+            
+            // Add flags to ensure the notification is persistent for workers
+            $workerNotification->persistent = true;
+            $workerNotification->for_worker = true;
+            $workerNotification->persist_for_worker = true;
+            
+            $workerNotification->data = [
+                'booking_id' => $booking->booking_id,
+                'customer_id' => $customer->id,
+                'customer_name' => $customer->name,
+                'timestamp' => $declineTimestamp->toIso8601String(),
+                'persistent' => true,
+                'for_worker' => true,
+                'persist_for_worker' => true
+            ];
+            
+            // Add decline reason if available
+            if (!empty($booking->decline_reason)) {
+                $workerNotification->data['decline_reason'] = $booking->decline_reason;
+            }
+            
+            // Store notification in database for worker
+            $worker->notify(new \App\Notifications\GenericNotification($workerNotification));
+            
+            Log::info('Persistent notification created for worker about booking decline', [
+                'worker_id' => $worker->id,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $declineTimestamp->toIso8601String(),
+                'persistent' => true
+            ]);
+            
+            // Send push notification to worker if they have a device token
+            if ($worker->device_token) {
+                // Prepare push notification data
+                $pushData = [
+                    'booking_id' => $booking->booking_id,
+                    'customer_id' => $customer->id,
+                    'customer_name' => $customer->name,
+                    'notification_type' => 'booking_declined',
+                    'timestamp' => $declineTimestamp->toIso8601String(),
+                    'persistent' => true,
+                    'for_worker' => true,
+                    'persist_for_worker' => true
+                ];
+                
+                // Add decline reason if available
+                if (!empty($booking->decline_reason)) {
+                    $pushData['decline_reason'] = $booking->decline_reason;
+                }
+                
+                $this->firebaseService->sendNotification(
+                    $worker->device_token,
+                    [
+                        'title' => $workerNotification->title,
+                        'body' => $workerNotification->body
+                    ],
+                    $pushData,
+                    $worker->device_type
+                );
+            }
+        }
+        
+        // Skip push notification if no device token
+        if (!$customer || !$customer->device_token) {
+            Log::info('Customer has no device token, skipping decline notification', [
+                'customer_id' => $booking->customer_id,
+                'booking_id' => $booking->booking_id
+            ]);
+            return false;
+        }
+        
+        $notification = [
+            'title' => '❌ Booking Declined',
+            'body' => "Your booking request for {$booking->title} has been declined by {$worker->name}."
+        ];
+        
+        $data = [
+            'booking_id' => $booking->booking_id,
+            'worker_id' => $worker->id,
+            'worker_name' => $worker->name,
+            'notification_type' => 'booking_declined',
+            'click_action' => 'FLUTTER_NOTIFICATION_CLICK',
+            'timestamp' => $declineTimestamp->toIso8601String() // Exact decline timestamp
+        ];
+        
+        try {
+            $this->firebaseService->sendNotification(
+                $customer->device_token, 
+                $notification, 
+                $data, 
+                $customer->device_type
+            );
+            
+            Log::info('Booking decline notification sent to customer with timestamp', [
+                'customer_id' => $customer->id,
+                'customer_name' => $customer->name,
+                'booking_id' => $booking->booking_id,
+                'timestamp' => $declineTimestamp->toIso8601String()
+            ]);
+            
+            return true;
+        } catch (\Exception $e) {
+            Log::error('Failed to send booking decline notification', [
+                'error' => $e->getMessage(),
+                'customer_id' => $customer->id
+            ]);
+            
+            return false;
+        }
     }
 
     /**
@@ -402,6 +832,170 @@ class BookingController extends Controller
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Failed to check availability',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get bookings for a specific user with optional worker filter
+     */
+    public function getUserBookings($userId, Request $request)
+    {
+        // Verify that the user exists
+        $user = User::where('id', $userId)->first();
+        
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        // Build the query to get user's bookings
+        $query = Booking::where('customer_id', $userId);
+        
+        // Filter by worker_id if provided
+        if ($request->has('worker_id')) {
+            $query->where('worker_id', $request->worker_id);
+        }
+        
+        // Get the bookings with pagination
+        $bookings = $query->orderBy('created_at', 'desc')->get();
+        
+        return response()->json([
+            'data' => $bookings,
+            'message' => 'User bookings retrieved successfully'
+        ]);
+    }
+
+    /**
+     * Cancel a booking by the client
+     * 
+     * @param int $bookingId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function cancelBooking($bookingId)
+    {
+        try {
+            // Find booking and verify ownership
+            $booking = Booking::findOrFail($bookingId);
+            
+            // Ensure the authenticated user is the one who made this booking
+            if ($booking->customer_id != Auth::id()) {
+                return response()->json([
+                    'error' => 'Unauthorized action',
+                    'message' => 'You can only cancel your own bookings'
+                ], 403);
+            }
+            
+            // Set the booking status to CANCELLED
+            $booking->status = 'CANCELLED';
+            $booking->save();
+            
+            // Get worker details for the notification
+            $worker = User::find($booking->worker_id);
+            $customer = User::find($booking->customer_id);
+            
+            // Create database notification
+            if ($worker) {
+                // Create timestamp for the cancellation
+                $cancelTimestamp = now();
+                
+                // Send notification to worker about the cancellation
+                $notification = [
+                    'title' => 'Booking Cancelled by ' . $customer->name,
+                    'body' => $customer->name . ' has cancelled the booking for ' . $booking->title . ' scheduled on ' . 
+                            Carbon::parse($booking->start)->format('F j, Y') . ' at ' . 
+                            Carbon::parse($booking->start_time)->format('h:i A'),
+                    'notification_type' => 'booking_cancelled',
+                    'data' => [
+                        'booking_id' => $booking->booking_id,
+                        'customer_id' => $customer->id,
+                        'customer_name' => $customer->name
+                    ],
+                    'timestamp' => $cancelTimestamp->toIso8601String()
+                ];
+                
+                if ($worker->device_token) {
+                    // Send push notification to worker
+                    $this->firebaseService->sendNotification(
+                        $worker->device_token,
+                        [
+                            'title' => $notification['title'],
+                            'body' => $notification['body']
+                        ],
+                        [
+                            'booking_id' => $booking->booking_id,
+                            'customer_id' => $customer->id,
+                            'customer_name' => $customer->name,
+                            'notification_type' => 'booking_cancelled',
+                            'timestamp' => $cancelTimestamp->toIso8601String()
+                        ],
+                        $worker->device_type
+                    );
+                }
+                
+                // Add to database notifications
+                $worker->notify(new \App\Notifications\GenericNotification((object) $notification));
+            }
+            
+            // Create notification for client as well
+            if ($customer) {
+                // Create timestamp for the cancellation
+                $cancelTimestamp = now();
+                
+                // Send notification to customer about their cancellation
+                $notification = [
+                    'title' => 'You Cancelled a Booking',
+                    'body' => 'You have successfully cancelled your booking for ' . $booking->title . ' with ' . 
+                            $worker->name . ' scheduled on ' . 
+                            Carbon::parse($booking->start)->format('F j, Y') . ' at ' . 
+                            Carbon::parse($booking->start_time)->format('h:i A'),
+                    'notification_type' => 'booking_cancelled',
+                    'data' => [
+                        'booking_id' => $booking->booking_id,
+                        'worker_id' => $worker->id,
+                        'worker_name' => $worker->name
+                    ],
+                    'timestamp' => $cancelTimestamp->toIso8601String()
+                ];
+                
+                if ($customer->device_token) {
+                    // Send push notification to customer
+                    $this->firebaseService->sendNotification(
+                        $customer->device_token,
+                        [
+                            'title' => $notification['title'],
+                            'body' => $notification['body']
+                        ],
+                        [
+                            'booking_id' => $booking->booking_id,
+                            'worker_id' => $worker->id,
+                            'worker_name' => $worker->name,
+                            'notification_type' => 'booking_cancelled',
+                            'timestamp' => $cancelTimestamp->toIso8601String()
+                        ],
+                        $customer->device_type
+                    );
+                }
+                
+                // Add to database notifications
+                $customer->notify(new \App\Notifications\GenericNotification((object) $notification));
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Booking cancelled successfully',
+                'booking' => $booking
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Error cancelling booking', [
+                'booking_id' => $bookingId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'error' => 'Failed to cancel booking',
                 'message' => $e->getMessage()
             ], 500);
         }

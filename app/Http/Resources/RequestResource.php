@@ -22,6 +22,7 @@ class RequestResource extends JsonResource
         return [
             'id' => $this->booking_id,
             'name' => $this->customer->name,
+            'service' => $this->title,
             'date' => $this->start,
             'end_date' => $this->end,
             'title' => $this->title,
@@ -30,9 +31,14 @@ class RequestResource extends JsonResource
             'description' => $this->description,
             'start_time' => $this->start_time,
             'proposedCost' => $this->amount,
-            'userPicture' => $this->image
-                ? url(Storage::url($this->image)) 
-                : null,
+            'user_profile_image' => $this->user_profile_image, // Use the computed user_profile_image from controller
+            'userPicture' => $this->image ? url(Storage::url($this->image)) : null, // Booking reference image
+            'phone' => $this->customer->phone, // Idagdag ang phone
+            'location' => $this->customer->location, // Idagdag ang location
+            'purok' => $this->customer->purok, // Idagdag ang purok
+            'street' => $this->customer->street, // Idagdag ang street
+            'email' => $this->customer->email, // Idagdag ang email
+            'removed_at' => $this->removed_at // Add removed_at field
         ];
     }
 }

@@ -22,11 +22,19 @@ class FavoriteController extends Controller
      */
     public function index(Request $request)
     {
-        
-        $skilledWorkers = SkilledWorker::with('user', 'reviews', 'works')
+        // Get skilled workers that are favorited by the current user
+        // and are not deactivated or scheduled for deletion
+        $skilledWorkers = SkilledWorker::with(['user', 'reviews', 'works'])
+            ->join('users', 'skilled_workers.user_id', '=', 'users.id')
             ->whereHas('favorites', function ($query) {
                 $query->where('customer_id', auth()->user()->id);
             })
+            ->where(function($query) {
+                $query->where('users.is_deactivated', false)
+                      ->orWhereNull('users.is_deactivated');
+            })
+            ->whereNull('users.deletion_scheduled_at')
+            ->select('skilled_workers.*')
             ->get();
 
         Log::info('Skilled Workers Fetched:'. auth()->user()->id);

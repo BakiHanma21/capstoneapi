@@ -169,13 +169,46 @@ class ProfileController extends Controller
                 'street' => 'nullable|string',
                 
             ]);
-
+            
+            // Save the current image before update
+            $currentImage = $user->image;
+            
+            // Update user data
             $user->update($validated);
+            
+            // Ensure the image is preserved
+            if ($currentImage) {
+                $user->image = $currentImage;
+                $user->save();
+            }
+            
+            // Format the image path properly for response
+            $imagePath = $user->image;
+            if ($imagePath && !str_starts_with($imagePath, 'storage/')) {
+                // If path exists but doesn't start with 'storage/', add it
+                if (str_starts_with($imagePath, '/images/') || str_starts_with($imagePath, 'images/')) {
+                    $imagePath = 'storage' . (str_starts_with($imagePath, '/') ? $imagePath : '/' . $imagePath);
+                }
+            }
+            
+            // Create response with updated user data including the properly formatted image
+            $userData = [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'location' => $user->location,
+                'image' => $imagePath,
+                'purok' => $user->purok,
+                'street' => $user->street,
+                'rating' => $user->rating,
+                'created_at' => $user->created_at
+            ];
 
             return response()->json([
                 'status' => 'success',
                 'message' => 'Profile updated successfully',
-                'data' => $user
+                'data' => $userData
             ]);
             
         } catch (\Exception $e) {

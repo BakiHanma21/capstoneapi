@@ -28,9 +28,17 @@ use App\Notifications\ResetPasswordNotification;
  * @property $valid_id
  * @property $purok
  * @property $street
+ * @property $is_deactivated
+ * @property $deactivation_reason
+ * @property $deletion_scheduled_at
+ * @property $deletion_reason
  * @property $remember_token
  * @property $created_at
  * @property $updated_at
+ * @method static find($id)
+ * @method static findOrFail($id)
+ * @method static where($column, $operator = null, $value = null)
+ * @method bool save()
  *
  * @package App
  * @mixin \Illuminate\Database\Eloquent\Builder
@@ -49,7 +57,9 @@ class User extends Authenticatable implements CanResetPasswordContract
     protected $fillable = [
         'name', 'email', 'password', 'phone', 'role', 'image', 'location', 
         'experience', 'availability', 'occupation', 'skills', 'valid_id', 
-        'purok', 'street', 'report_reason'
+        'purok', 'street', 'report_reason', 'device_token', 'device_type',
+        'is_deactivated', 'deactivation_reason', 'deletion_scheduled_at', 'deletion_reason',
+        'last_activity_at'
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -57,6 +67,7 @@ class User extends Authenticatable implements CanResetPasswordContract
     protected $casts = [
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
+        'last_activity_at' => 'datetime',
     ];
 
     /**
@@ -80,5 +91,21 @@ class User extends Authenticatable implements CanResetPasswordContract
     public function bookingsAsWorker()
     {
         return $this->hasMany(Booking::class, 'worker_id');
+    }
+
+    public function skilledWorker()
+    {
+        return $this->hasOne(SkilledWorker::class, 'user_id');
+    }
+    
+    /**
+     * This is just to help the IDE recognize the save() method.
+     * The actual implementation is provided by the Authenticatable class.
+     * 
+     * @return bool
+     */
+    public function save(array $options = [])
+    {
+        return parent::save($options);
     }
 }

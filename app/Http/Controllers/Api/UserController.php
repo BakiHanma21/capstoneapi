@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\User;
 use App\Models\SkilledWorker;
 use App\Models\WorkerWork;
+use App\Models\VerificationHistory;
 use App\Models\WorkRequest;
 use App\Models\Transaction;
 use App\Models\Report;
@@ -72,10 +73,13 @@ class UserController extends Controller
     public function updateverifications(Request $request, $id)
     {
         $user = User::findOrFail($id);
+        
+        // Save to verification history before updating
+        $this->storeVerificationHistory($user, 'Approved');
+
         $user->availability = 0;
         $user->save();
 
-        // Send email notification if requested
         if ($request->has('sendEmail') && $request->sendEmail && $request->emailType === 'approval') {
             Mail::to($user->email)->send(new AccountApproved($user));
         }
@@ -106,9 +110,13 @@ class UserController extends Controller
     {
         $user = User::findOrFail($id);
         
-        // Send email notification if requested
+        // Save to verification history before deleting
+        $this->storeVerificationHistory($user, 'Denied');
+        
         if ($request->has('sendEmail') && $request->sendEmail && $request->emailType === 'denial') {
-            Mail::to($user->email)->send(new AccountDenied($user));
+            // Get the denial reason from the request
+            $denialReason = $request->input('denialReason');
+            Mail::to($user->email)->send(new AccountDenied($user, $denialReason));
         }
         
         if ($user->role === 'WORKER') {
@@ -282,8 +290,21 @@ class UserController extends Controller
     }
 
     public function getdashboard(Request $request) {
-        $totalUsers = User::where('role', 'USER')->count(); 
-        $totalSkilledWorkers = User::where('role', 'WORKER')->count(); 
+        // Check if we should only count verified users
+        $verifiedOnly = $request->has('verified_only') && $request->verified_only === 'true';
+        
+        // Build queries based on the verified_only parameter
+        $userQuery = User::where('role', 'USER');
+        $workerQuery = User::where('role', 'WORKER');
+        
+        // If verified_only is true, only count users with availability != 5
+        if ($verifiedOnly) {
+            $userQuery->where('availability', '!=', 5);
+            $workerQuery->where('availability', '!=', 5);
+        }
+        
+        $totalUsers = $userQuery->count(); 
+        $totalSkilledWorkers = $workerQuery->count(); 
 
         // Return data in JSON format
         return response()->json([
@@ -294,73 +315,90 @@ class UserController extends Controller
 
     public function getadminProfile()
     {
-        $user = User::where('id', auth()->user()->id)->first();
+        $user = User::find(Auth::id());
+        if (!$user) {
+            return response()->json(['error' => 'User not authenticated'], 401);
+        }
 
         return response()->json([
-            'data' => [
-                'name' => $user->name,
-                'email' => $user->email,
-                'profile_picture' => $user->profile_picture,
-                'password' => "",
-                'role' => $user->skills,
-                'image' => url(Storage::url($user->image))
-            ]
+            'name' => $user->name,
+            'email' => $user->email,
+            'phone' => $user->phone,
+            'image' => $user->image ? url('storage/' . $user->image) : null,
+            'role' => $user->role,
+            'created_at' => $user->created_at,
+            'last_login' => $user->updated_at
         ]);
     }
 
     public function updateadmin(Request $request)
     {
-        $validated = $request->validate([
-            'email' => 'required|email',
-            'password' => 'nullable|min:6',
-            'role' => 'nullable|string',
-        ]);
-
-        $user = User::find(auth()->user()->id);
-
-        if ($user) {
-            $user->email = $validated['email'];
-            Log::info('Password: ' . $validated['password']);
-            if ($validated['password']) {
-                $user->password = Hash::make($validated['password']);
-            }
-            if ($validated['role']) {
-                $user->skills = $validated['role'];
-            }
-            $user->save();
-
-            return response()->json([
-                'message' => 'Profile updated successfully',
-                'data' => $user
-            ]);
+        $user = User::find(Auth::id());
+        if (!$user) {
+            return response()->json(['error' => 'User not authenticated'], 401);
         }
 
+        $request->validate([
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email,' . $user->id,
+            'phone' => 'nullable|string|max:255',
+            'currentPassword' => 'required|string',
+        ]);
+
+        // Verify current password
+        if (!Hash::check($request->currentPassword, $user->password)) {
+            return response()->json(['error' => 'Current password is incorrect'], 422);
+        }
+
+        $user->name = $request->name;
+        $user->email = $request->email;
+        $user->phone = $request->phone;
+        $user->role = 'ADMINISTRATOR'; // Always set to ADMINISTRATOR
+        
+        // Update password if provided
+        if ($request->filled('password')) {
+            $user->password = Hash::make($request->password);
+        }
+        
+        $user->save();
+
         return response()->json([
-            'message' => 'User not found'
-        ], 404);
+            'message' => 'Profile updated successfully',
+            'user' => [
+                'name' => $user->name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'role' => $user->role,
+                'created_at' => $user->created_at,
+                'last_login' => $user->updated_at
+            ]
+        ]);
     }
 
     public function updateProfilePicture(Request $request)
 {
-    $file = $request->file('profile_picture');
+    $request->validate([
+        'profile_picture' => 'required|image|mimes:jpeg,png,jpg,gif|max:2048',
+    ]);
 
+    if ($request->hasFile('profile_picture')) {
+    $file = $request->file('profile_picture');
     $imageName = time() . '.' . $file->extension();
     $file->move(public_path('storage/images'), $imageName);
 
-    $user = auth()->user();
+        $user = User::find(Auth::id());
     $user->image = "images/" . $imageName;
     $user->save();
 
     return response()->json([
-        'data' => [
-            'name' => $user->name,
-            'email' => $user->email,
-            'profile_picture' => $user->image,
-            'password' => "",
-            'role' => $user->role,
-            'image' => url(Storage::url($user->image))
-        ]
-    ]);
+            'message' => 'Profile picture updated successfully',
+            'image_url' => url('storage/images/' . $imageName)
+        ]);
+    }
+
+    return response()->json([
+        'message' => 'No image file provided'
+    ], 400);
 }
 
 
@@ -429,6 +467,9 @@ public function workerSignup(Request $request)
         'skills' => 'required|string|max:255',
         'valid_id' => 'nullable|image|max:2048',
         'years_of_experience' => 'required|integer|min:0',
+        'work_example_1_title' => 'required|string|max:255',
+        'work_example_1_description' => 'required|string',
+        'work_example_1_image' => 'required|image|max:2048',
     ]);
 
     $user = new User();
@@ -476,27 +517,26 @@ public function workerSignup(Request $request)
     $skilledWorker->availability = 0;
     $skilledWorker->save();
 
-    for ($i = 1; $i <= 2; $i++) {
-        $workExampleTitle = $request->input("work_example_{$i}_title");
-        $workExampleDescription = $request->input("work_example_{$i}_description");
-        $workExampleImage = null;
+    // Process only one work example instead of two
+    $workExampleTitle = $request->input("work_example_1_title");
+    $workExampleDescription = $request->input("work_example_1_description");
+    $workExampleImage = null;
 
-        if ($request->hasFile("work_example_{$i}_image")) {
-            $file = $request->file("work_example_{$i}_image");
-            $imageName = time() . '_work_example_' . $i . '.' . $file->extension();
-            $file->move(public_path('storage/images'), $imageName);
-            $workExampleImage = "images/" . $imageName;
-        }
-        
-        WorkerWork::create([
-            'worker_id' => $skilledWorker->id,
-            'title' => $workExampleTitle,
-            'description' => $workExampleDescription,
-            'image' => $workExampleImage,
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+    if ($request->hasFile("work_example_1_image")) {
+        $file = $request->file("work_example_1_image");
+        $imageName = time() . '_work_example_1.' . $file->extension();
+        $file->move(public_path('storage/images'), $imageName);
+        $workExampleImage = "images/" . $imageName;
     }
+    
+    WorkerWork::create([
+        'worker_id' => $skilledWorker->id,
+        'title' => $workExampleTitle,
+        'description' => $workExampleDescription,
+        'image' => $workExampleImage,
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
 
     return response()->json(['message' => 'User and worker profile registered successfully!']);
 }
@@ -523,5 +563,134 @@ public function workerSignup(Request $request)
             return response()->json(['error' => 'Failed to send the report.'], 500);
         }
 
+    }
+
+    public function storeVerificationHistory($user, $status)
+    {
+        $workExamples = [];
+        if ($user->role === 'WORKER') {
+            $skilled = SkilledWorker::where('user_id', $user->id)->first();
+            if ($skilled) {
+                // Get all work examples for this worker (could be 1-3 examples)
+                $workExamples = WorkerWork::where('worker_id', $skilled->id)->get()->map(function ($work) {
+                    return [
+                        'title' => $work->title,
+                        'description' => $work->description,
+                        'image' => $work->image ? url(Storage::url($work->image)) : null,
+                    ];
+                })->toArray();
+            }
+        }
+
+        VerificationHistory::create([
+            'user_id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'phone' => $user->phone,
+            'experience' => $user->experience,
+            'skills' => $user->skills,
+            'role' => $user->role,
+            'location' => $user->location,
+            'purok' => $user->purok,
+            'street' => $user->street,
+            'image' => $user->image ? url(Storage::url($user->image)) : null,
+            'valid_id' => $user->valid_id ? url(Storage::url($user->valid_id)) : null,
+            'status' => $status,
+            'approved_at' => $status === 'Approved' ? now() : null,
+            'denied_at' => $status === 'Denied' ? now() : null,
+            'work_examples' => $workExamples,
+        ]);
+    }
+
+    public function getVerificationHistory()
+    {
+        // Get all verification history records
+        $history = VerificationHistory::all()->map(function ($record) {
+            return [
+                'id' => $record->user_id,
+                'name' => $record->name,
+                'email' => $record->email,
+                'phone' => $record->phone,
+                'contactNumber' => $record->phone,
+                'experience' => $record->experience,
+                'skills' => $record->skills,
+                'role' => $record->role,
+                'location' => $record->location,
+                'purok' => $record->purok,
+                'street' => $record->street,
+                'image' => $record->image,
+                'valid_id' => $record->valid_id,
+                'status' => $record->status,
+                'approved_at' => $record->approved_at ? $record->approved_at->toIso8601String() : null,
+                'denied_at' => $record->denied_at ? $record->denied_at->toIso8601String() : null,
+                'work_examples' => $record->work_examples,
+                'for_chat_only' => $record->status === 'ChatBackup',
+            ];
+        });
+
+        return response()->json($history);
+    }
+    
+    /**
+     * Delete a verification history record
+     * 
+     * @param int $userId
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function deleteVerificationHistory($userId)
+    {
+        // Find the record by user_id
+        $record = VerificationHistory::where('user_id', $userId)->first();
+        
+        if (!$record) {
+            return response()->json(['message' => 'Verification history record not found'], 404);
+        }
+        
+        // Instead of deleting the record completely, create a backup with a special status
+        // This ensures the profile data remains available for chat purposes
+        $chatBackup = new VerificationHistory();
+        $chatBackup->user_id = $record->user_id;
+        $chatBackup->name = $record->name;
+        $chatBackup->email = $record->email;
+        $chatBackup->phone = $record->phone;
+        $chatBackup->experience = $record->experience;
+        $chatBackup->skills = $record->skills;
+        $chatBackup->role = $record->role;
+        $chatBackup->location = $record->location;
+        $chatBackup->purok = $record->purok;
+        $chatBackup->street = $record->street;
+        $chatBackup->image = $record->image;
+        $chatBackup->valid_id = $record->valid_id;
+        $chatBackup->status = 'ChatBackup';  // Special status to indicate this is a backup for chat
+        $chatBackup->approved_at = $record->approved_at;
+        $chatBackup->denied_at = $record->denied_at;
+        $chatBackup->work_examples = $record->work_examples;
+        $chatBackup->save();
+        
+        // Delete the original record
+        $record->delete();
+        
+        return response()->json(['message' => 'Verification history record deleted successfully, chat data preserved']);
+    }
+
+    public function getAdminPassword(Request $request)
+    {
+        $user = User::find(Auth::id());
+        if (!$user) {
+            return response()->json(['error' => 'User not authenticated'], 401);
+        }
+
+        $request->validate([
+            'currentPassword' => 'required|string'
+        ]);
+
+        // Verify current password
+        if (!Hash::check($request->currentPassword, $user->password)) {
+            return response()->json(['error' => 'Current password is incorrect'], 422);
+        }
+
+        return response()->json([
+            'password' => $request->currentPassword
+        ]);
     }
 }

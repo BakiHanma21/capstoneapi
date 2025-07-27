@@ -15,7 +15,7 @@ return new class extends Migration
             $table->foreignId('worker_id')->constrained('users');
             $table->foreignId('customer_id')->constrained('users');
             $table->string('title');
-            $table->string('description');
+            $table->string('description', 1000);
             $table->integer('amount')->nullable();
             $table->date('start');
             $table->date('end')->nullable();

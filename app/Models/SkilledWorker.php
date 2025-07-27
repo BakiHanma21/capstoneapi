@@ -29,14 +29,40 @@ class SkilledWorker extends Model
 
     protected $perPage = 20;
 
+    /**
+     * The table associated with the model.
+     *
+     * @var string
+     */
+    protected $table = 'skilled_workers';
+
+    /**
+     * The primary key for the model.
+     *
+     * @var string
+     */
     protected $primaryKey = 'id';
+
+    /**
+     * Indicates if the model's ID is auto-incrementing.
+     *
+     * @var bool
+     */
+    public $incrementing = true;
+
+    /**
+     * The data type of the auto-incrementing ID.
+     *
+     * @var string
+     */
+    protected $keyType = 'int';
 
     /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
      */
-    protected $fillable = ['worker_id', 'user_id', 'job', 'location', 'experience', 'availability', 'work_done', 'work_image'];
+    protected $fillable = ['user_id', 'job', 'location', 'experience', 'availability', 'work_done', 'work_image'];
 
     public function reviews()
     {
@@ -61,6 +87,11 @@ class SkilledWorker extends Model
     public function transactions()
     {
         return $this->hasMany(Transaction::class, 'request_id', 'user_id')->whereNotNull('review2');
+    }
+
+    public function services()
+    {
+        return $this->hasMany(WorkerService::class, 'worker_id');
     }
 }
     
